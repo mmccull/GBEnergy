@@ -438,7 +438,7 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 
 	coulE=0;
 
-	/* Loop through all atoms and compute the SASA for each atom.  Total SASA is a sum of all atom contributions. */
+	/* GB Phase 1: Compute Born Radii */
 	for (atom1=0;atom1<nAtoms;atom1++) {
 
 		/* zero first term in neighbor list.  This will be used as a counting term */
@@ -464,8 +464,16 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 		}
 
 		screening = 0;
-		for (atom2=0;atom2<nAtoms;atom2++) {	
-					if (atom2 != atom1) {
+//		for (atom2=0;atom2<nAtoms;atom2++) {	
+		for (cellX1=cellMin[0];cellX1<=cellMax[0];cellX1++) {
+			for (cellY1=cellMin[1];cellY1<=cellMax[1];cellY1++) {
+				for (cellZ1=cellMin[2];cellZ1<=cellMax[2];cellZ1++) {
+					cell1 = cellX1*nCells[1]*nCells[2]+cellY1*nCells[2]+cellZ1;
+
+					for (i=0;i<cellSize[cell1];i++) {
+			
+						atom2 = cellList[cell1][i];
+						if (atom2 != atom1) {
 							/* compute the distance between the atoms */
 							dist1_2=0;
 							for (k=0;k<3;k++) {
@@ -496,7 +504,10 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 //								printf("%4d %4d %10.5f %10.5f %10.5f %10.5f\n",atom1, atom2, charge[atom1], charge[atom2], dist1, temp);
 
 							} 
+						}
 					}
+				}
+			}
 		}
 		/* Finish screening of atom1 */
 		screening *= (atomicRadius[atom1]-offset);
@@ -508,8 +519,8 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 
 	}
 
+	/* GB Phase 2: Compute dEijdrij, dai/drij and GB energy */
 	gbE = 0;
-
 	for (atom1=0;atom1<nAtoms;atom1++) {
 
 		for(i=1;i<=neighborList[atom1][0];i++) {
@@ -557,6 +568,7 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 
 	printf("Generalized Born Energy: %20.10f Coulomb Energy: %20.10f Total: %20.10f\n",gbE,coulE,coulE+gbE);
 
+	/* GB Phase 3: Compute dETGBddai */
 }
 
 

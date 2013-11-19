@@ -613,7 +613,7 @@ double compute_H(double rij, double rhoi, double rhoj, double offset, double Sj,
 double compute_dH(double rij, double rhoi, double rhoj, double offset, double Sj, double rCut) {
 
 	double sRhoj = (rhoj-offset)*Sj;
-	double sRhoj2 = scaledRhoj*scaledRhoj;
+	double sRhoj2 = sRhoj*sRhoj;
 	double rhoi0 = rhoi-offset;
 	double rhoi02 = rhoi0*rhoi0;
 	double da = 1.333333333333333; // 4* 1/3
@@ -629,7 +629,7 @@ double compute_dH(double rij, double rhoi, double rhoj, double offset, double Sj
 	if (rij > (sRhoj + rCut)) { //h0
 		return 0.0;
 	} else if (rij <= (sRhoj+rCut) && rij > (rCut - sRhoj)) { //h1
-		return -(rCut+sRhoj-rij)*(sRhoj2_rij2)/(8.0f*rc2*rij2*(sRhoj-rij)*(sRhoj-rij))-0.25/rij2*log((rij-sRhoj)/rCut);
+		return -(rCut+sRhoj-rij)*(sRhoj2-rij2)/(8.0f*rc2*rij2*(sRhoj-rij)*(sRhoj-rij))-0.25/rij2*log((rij-sRhoj)/rCut);
 	} else if (rij <= (rCut-sRhoj) && rij > (4*sRhoj)) { //h2
 		k = sRhoj2/rij2; // rhojs^2/rij^2
 		k2 = k*sRhoj/(rij2*rij); // rhojs^3/rij^5

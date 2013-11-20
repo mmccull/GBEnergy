@@ -407,7 +407,7 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 	double offset=0.09; // Angstroms
 //	double ke = 332.063711; //kcal/mol*Angstroms/e^2 coulombs constant
 	double ke = 332.0636; //kcal/mol*Angstroms/e^2 coulombs constant
-	double alpha = 1.0; // parameter for born radius eqaution
+	double delta = 1.0; // parameter for born radius eqaution
 	double beta = 0.8; // parameter for born radius eqaution
 	double gamma = 4.85; // parameter for born radius eqaution
 	double rCut2 = rCut*rCut;
@@ -425,7 +425,7 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 	double dx, dy, dz;
 	double dist2, dist2_2;
 	int neighborList[nAtoms][nAtoms+1];
-	double screening;
+	double psi[nAtoms];
 	double bornRadius[nAtoms];
 	double gbE;
 	double gbEij;
@@ -445,6 +445,12 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 	double dscaledrij;
 	double qiqj;
 	double aiaj;
+	double dEda[nAtoms];
+	double tmp_dEda;
+	double tanh2;
+	double daidr[nAtoms];
+	double forceMag,fx,fy,fz;
+	double dhij,dhji;
 
 	coulE=0;
 
@@ -453,6 +459,7 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 
 		/* zero forces */
 		force[atom1][0]=force[atom1][1]=force[atom1][2]=0.0;
+		dEda[atom1]=0;
 	
 		/* zero first term in neighbor list.  This will be used as a counting term */
 		neighborList[atom1][0]=0;
@@ -476,7 +483,7 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 			}
 		}
 
-		screening = 0;
+		psi[atom1] = 0;
 //		for (atom2=0;atom2<nAtoms;atom2++) {	
 		for (cellX1=cellMin[0];cellX1<=cellMax[0];cellX1++) {
 			for (cellY1=cellMin[1];cellY1<=cellMax[1];cellY1++) {
@@ -497,7 +504,7 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 								dist1 = sqrt(dist1_2);
 		
 								/* accumulate the GB screening function (also called psi) */
-								screening += compute_H(dist1,atomicRadius[atom1],atomicRadius[atom2],offset,atomicScaling[atom2],aCut);
+								psi[atom1] += compute_H(dist1,atomicRadius[atom1],atomicRadius[atom2],offset,atomicScaling[atom2],aCut);
 	
 								/* populate neighbor list while we are here */
 								neighborList[atom1][neighborList[atom1][0]+1] = atom2;
@@ -523,10 +530,10 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 			}
 		}
 		/* Finish screening of atom1 */
-		screening *= (atomicRadius[atom1]-offset);
+		psi[atom1] *= (atomicRadius[atom1]-offset);
 
 		/* Compute born radius for atom1 using screening term */
-		bornRadius[atom1] = 1.0/(1.0/(atomicRadius[atom1]-offset)-1.0/atomicRadius[atom1]*tanh(alpha*screening-beta*screening*screening+gamma*screening*screening*screening));
+		bornRadius[atom1] = 1.0/(1.0/(atomicRadius[atom1]-offset)-1.0/atomicRadius[atom1]*tanh(delta*psi[atom1]-beta*psi[atom1]*psi[atom1]+gamma*psi[atom1]*psi[atom1]*psi[atom1]));
 
 //		printf("Atom: %5d Radius: %20.10f Psi: %20.10f\n",atom1,bornRadius[atom1],screening);
 
@@ -535,7 +542,6 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 	/* GB Phase 2: Compute dEijdrij, dai/drij and GB energy */
 	gbE = 0;
 	for (atom1=0;atom1<nAtoms;atom1++) {
-
 		for(i=1;i<=neighborList[atom1][0];i++) {
 			atom2 = neighborList[atom1][i];
 			/* avoid double counting */
@@ -573,34 +579,71 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 				fdEijdrij = -dEijdrij*scale-gbEij*dscaledrij;
 				printf("dEijdrij:%20.10f between atom %d and %d. Eij: %20.10f dEijdrij: %20.10f scaled %20.10f\n",fdEijdrij,atom1,atom2,gbEij,dEijdrij,scale);
 
-				force[atom1][0] += -dEijdrij*dx/dist1;
-				force[atom1][1] += -dEijdrij*dy/dist1;
-				force[atom1][2] += -dEijdrij*dz/dist1;
-				force[atom2][0] +=  dEijdrij*dx/dist1;
-				force[atom2][1] +=  dEijdrij*dy/dist1;
-				force[atom2][2] +=  dEijdrij*dz/dist1;
+				/* add to atomic force array */
+				force[atom1][0] +=  fdEijdrij*dx/dist1;
+				force[atom1][1] +=  fdEijdrij*dy/dist1;
+				force[atom1][2] +=  fdEijdrij*dz/dist1;
+				force[atom2][0] += -fdEijdrij*dx/dist1;
+				force[atom2][1] += -fdEijdrij*dy/dist1;
+				force[atom2][2] += -fdEijdrij*dz/dist1;
 
-				/* compute the dalphaidrij terms */
+				/* Accumulate component of dEda terms */
+				tmp_dEda = 0.5*qiqj/fij/fij*(kappa/epsSolvent*exp(-kappa*fij)-Dij/fij)*(aiaj+0.25*dist1_2)*exp(-0.25*dist1_2/aiaj);
+				dEda[atom1] += tmp_dEda/bornRadius[atom1]*scale;
+				dEda[atom2] += tmp_dEda/bornRadius[atom2]*scale;
 
 			}
 
 		}
 		/* Self Energy term */
 		fij = bornRadius[atom1];
-
 		Dij = 1.0/epsSolute - exp(-kappa*fij)/epsSolvent;
-
 		selfE = -ke * Dij * charge[atom1]*charge[atom1]/(2*fij);
-
-//		printf("Atom: %5d Self Energy: %20.10f\n",atom1,selfE);
-
 		gbE += selfE;
+		/* Accumulate daidr terms */
+		tanh2 = tanh(psi[atom1]*(delta+psi[atom1]*(-beta+gamma*psi[atom1])));
+		tanh2*=tanh2;
+		daidr[atom1] = bornRadius[atom1]*bornRadius[atom1]*(atomicRadius[atom1]-offset)/atomicRadius[atom1]*(1-tanh2)*(delta-2*beta*psi[atom1]+3*psi[atom1]*psi[atom1]);
 
 	}
 
 	printf("Generalized Born Energy: %20.10f Coulomb Energy: %20.10f Total: %20.10f\n",gbE,coulE,coulE+gbE);
 
 	/* GB Phase 3: Compute dETGBddai */
+	for (atom1=0;atom1<nAtoms;atom1++) {
+		for(i=1;i<=neighborList[atom1][0];i++) {
+			atom2 = neighborList[atom1][i];
+			/* avoid double counting */
+			if (atom2>atom1) {
+				/* compute the distance between the atoms */
+				dist1_2=0;
+				dx = pos[atom1][0]-pos[atom2][0];
+				dy = pos[atom1][1]-pos[atom2][1];
+				dz = pos[atom1][2]-pos[atom2][2];
+				dist1_2 = dx*dx+dy*dy+dz*dz;
+				dist1 = sqrt(dist1_2);
+
+				/* compute remaining components of daidr terms */
+				dhij = compute_dH(dist1,atomicRadius[atom1],atomicRadius[atom2],offset,atomicScaling[atom2],aCut);
+				dhji = compute_dH(dist1,atomicRadius[atom2],atomicRadius[atom1],offset,atomicScaling[atom1],aCut);
+
+				forceMag = dEda[atom1]*daidr[atom1]*dhij+dEda[atom2]*daidr[atom2]*dhji;
+				fx = dx/dist1*forceMag;
+				fy = dy/dist1*forceMag;
+				fz = dz/dist1*forceMag;
+
+				/* add to atomic force array */
+				force[atom1][0] +=  fx;
+				force[atom1][1] +=  fy;
+				force[atom1][2] +=  fz;
+				force[atom2][0] += -fx;
+				force[atom2][1] += -fy;
+				force[atom2][2] += -fz;
+			}
+		}
+	}
+
+
 }
 
 

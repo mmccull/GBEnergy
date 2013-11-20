@@ -495,10 +495,10 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 						atom2 = cellList[cell1][i];
 						if (atom2 != atom1) {
 							/* compute the distance between the atoms */
-							dist1_2=0;
-							for (k=0;k<3;k++) {
-								dist1_2 += (pos[atom1][k]-pos[atom2][k])*(pos[atom1][k]-pos[atom2][k]);
-							}
+							dx = pos[atom1][0]-pos[atom2][0];
+							dy = pos[atom1][1]-pos[atom2][1];
+							dz = pos[atom1][2]-pos[atom2][2];
+							dist1_2 = dx*dx+dy*dy+dz*dz;
 							dist1 = sqrt(dist1_2);
 							if (dist1<rCut) {
 								dist1 = sqrt(dist1_2);
@@ -516,12 +516,27 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 								/* NAMD shift/smoothing function */
 								scale = (1-dist1_2/rCut2);
 								scale *= scale;
+								dscaledrij = 4.0*dist1*(dist1_2-rCut2)/(rCut2*rCut2);
 	
 								/* accumulate coulomb energy */
 //								coulE += ke*charge[atom1]*charge[atom2]/dist1*scale;
 								temp = ke*charge[atom1]*charge[atom2]/dist1*scale;
 								coulE += temp;
-//								printf("%4d %4d %10.5f %10.5f %10.5f %10.5f\n",atom1, atom2, charge[atom1], charge[atom2], dist1, temp);
+
+								/* compute coulomb force magnitude */
+								temp = -ke*charge[atom1]*charge[atom2]/dist1_2*scale;
+								temp += ke*charge[atom1]*charge[atom2]/dist1*dscaledrij;
+								/* add to atomic force array */
+								force[atom1][0] += -temp*dx/dist1;
+								force[atom1][1] += -temp*dy/dist1;
+								force[atom1][2] += -temp*dz/dist1;
+								force[atom2][0] +=  temp*dx/dist1;
+								force[atom2][1] +=  temp*dy/dist1;
+								force[atom2][2] +=  temp*dz/dist1;
+
+								printf("%10.5f%10.5f%10.5f%10.5f\n", charge[atom1],charge[atom2],dx,temp*dx/dist1);
+
+//								
 
 							} 
 						}
@@ -577,7 +592,7 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 				dEijdrij = -qiqj/fij*(dDijdrij-Dij/fij*dfijdrij);
 				dscaledrij = 4.0*dist1*(dist1_2-rCut2)/(rCut2*rCut2);
 				fdEijdrij = -dEijdrij*scale-gbEij*dscaledrij;
-				printf("dEijdrij:%20.10f between atom %d and %d. Eij: %20.10f dEijdrij: %20.10f scaled %20.10f\n",fdEijdrij,atom1,atom2,gbEij,dEijdrij,scale);
+//				printf("dEijdrij:%20.10f between atom %d and %d. Eij: %20.10f dEijdrij: %20.10f scaled %20.10f\n",fdEijdrij,atom1,atom2,gbEij,dEijdrij,scale);
 
 				/* add to atomic force array */
 				force[atom1][0] +=  fdEijdrij*dx/dist1;
@@ -588,7 +603,8 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 				force[atom2][2] += -fdEijdrij*dz/dist1;
 
 				/* Accumulate component of dEda terms */
-				tmp_dEda = 0.5*qiqj/fij/fij*(kappa/epsSolvent*exp(-kappa*fij)-Dij/fij)*(aiaj+0.25*dist1_2)*exp(-0.25*dist1_2/aiaj);
+				tmp_dEda = -0.5*qiqj/fij/fij*(kappa/epsSolvent*exp(-kappa*fij)-Dij/fij)*(aiaj+0.25*dist1_2)*exp(-0.25*dist1_2/aiaj);
+				printf("Instantaneous dEda value :%20.10f between atom %d and %d\n",tmp_dEda,atom1,atom2);
 				dEda[atom1] += tmp_dEda/bornRadius[atom1]*scale;
 				dEda[atom2] += tmp_dEda/bornRadius[atom2]*scale;
 
@@ -627,6 +643,8 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 				dhij = compute_dH(dist1,atomicRadius[atom1],atomicRadius[atom2],offset,atomicScaling[atom2],aCut);
 				dhji = compute_dH(dist1,atomicRadius[atom2],atomicRadius[atom1],offset,atomicScaling[atom1],aCut);
 
+				printf("Pair %4d-%4d dhij:%10.5f dhji:%10.5f HijPrefix:%10.5f HjiPrefix%10.5f\n",atom1, atom2, dhij,dhji,dEda[atom1]*daidr[atom1],dEda[atom2]*daidr[atom2]);
+
 				forceMag = dEda[atom1]*daidr[atom1]*dhij+dEda[atom2]*daidr[atom2]*dhji;
 				fx = dx/dist1*forceMag;
 				fy = dy/dist1*forceMag;
@@ -641,6 +659,11 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 				force[atom2][2] += -fz;
 			}
 		}
+	}
+
+	/* print forces */
+	for (atom1=0;atom1<nAtoms;atom1++) {
+		fprintf(gbForceFile,"%5d %10.5f%10.5f%10.5f\n",atom1, force[atom1][0],force[atom1][1],force[atom1][2]);
 	}
 
 

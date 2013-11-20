@@ -422,6 +422,7 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 	int cellMin[3],cellMax[3];
 	int cellX1, cellY1, cellZ1;
 	double dist1, dist1_2;
+	double dx, dy, dz;
 	double dist2, dist2_2;
 	int neighborList[nAtoms][nAtoms+1];
 	double screening;
@@ -435,12 +436,20 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 	double hij;
 	double scale;
 	double temp;
+	double force[nAtoms][3];
+	double dEijdrij;
+	double dDijdrij;
+	double dfijdrij;
+	double dalphaidrij[nAtoms];
 
 	coulE=0;
 
 	/* GB Phase 1: Compute Born Radii */
 	for (atom1=0;atom1<nAtoms;atom1++) {
 
+		/* zero forces */
+		force[atom1][0]=force[atom1][1]=force[atom1][2]=0.0;
+	
 		/* zero first term in neighbor list.  This will be used as a counting term */
 		neighborList[atom1][0]=0;
 
@@ -529,9 +538,10 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 			if (atom2>atom1) {
 				/* compute the distance between the atoms */
 				dist1_2=0;
-				for (k=0;k<3;k++) {
-					dist1_2 += (pos[atom1][k]-pos[atom2][k])*(pos[atom1][k]-pos[atom2][k]);
-				}
+				dx = pos[atom1][0]-pos[atom2][0];
+				dy = pos[atom1][1]-pos[atom2][1];
+				dz = pos[atom1][2]-pos[atom2][2];
+				dist1_2 = dx*dx+dy*dy+dz*dz;
 				dist1 = sqrt(dist1_2);
 
 				/* compute GB energy term for this pair */
@@ -549,6 +559,19 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 				/* accumulate energy */
 				gbE += scale*gbEij;
 
+				/* accumulate forces for dEijdrij terms */
+				dfijdrij = dist1/fij*(1-0.25*exp(-dist1_2*0.25/(bornRadius[atom1]*bornRadius[atom2])));
+				dDijdrij = kappa/epsSolvent*exp(-kappa*fij)*dfijdrij;
+				dEijdrij = -ke*charge[atom1]*charge[atom2]/fij*(dDijdrij-Dij/fij*dfijdrij);
+
+				force[atom1][0] += -dEijdrij*dx/dist1;
+				force[atom1][1] += -dEijdrij*dy/dist1;
+				force[atom1][2] += -dEijdrij*dz/dist1;
+				force[atom2][0] +=  dEijdrij*dx/dist1;
+				force[atom2][1] +=  dEijdrij*dy/dist1;
+				force[atom2][2] +=  dEijdrij*dz/dist1;
+
+				/* compute the dalphaidrij terms */
 
 			}
 

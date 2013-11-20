@@ -438,9 +438,13 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 	double temp;
 	double force[nAtoms][3];
 	double dEijdrij;
+	double fdEijdrij;
 	double dDijdrij;
 	double dfijdrij;
 	double dalphaidrij[nAtoms];
+	double dscaledrij;
+	double qiqj;
+	double aiaj;
 
 	coulE=0;
 
@@ -543,16 +547,18 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 				dz = pos[atom1][2]-pos[atom2][2];
 				dist1_2 = dx*dx+dy*dy+dz*dz;
 				dist1 = sqrt(dist1_2);
+				qiqj = ke*charge[atom1]*charge[atom2];
+				aiaj = bornRadius[atom1]*bornRadius[atom2];
 
 				/* compute GB energy term for this pair */
 
-				fij = sqrt(dist1_2 + bornRadius[atom1]*bornRadius[atom2]*exp(-dist1_2/(4.0*bornRadius[atom1]*bornRadius[atom2])));
+				fij = sqrt(dist1_2 + aiaj*exp(-dist1_2*0.25/aiaj));
 
 //				hij = 1/dist1 - 1/fij;
 
 				Dij = 1.0/epsSolute - exp(-kappa*fij)/epsSolvent;
 
-				gbEij = -ke*charge[atom1]*charge[atom2]*Dij/fij;
+				gbEij = -qiqj*Dij/fij;
 				/* NAMD smoothing function */
 				scale = dist1_2/rCut2-1.0;
 				scale*=scale;
@@ -560,9 +566,12 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 				gbE += scale*gbEij;
 
 				/* accumulate forces for dEijdrij terms */
-				dfijdrij = dist1/fij*(1-0.25*exp(-dist1_2*0.25/(bornRadius[atom1]*bornRadius[atom2])));
+				dfijdrij = dist1/fij*(1-0.25*exp(-dist1_2*0.25/aiaj));
 				dDijdrij = kappa/epsSolvent*exp(-kappa*fij)*dfijdrij;
-				dEijdrij = -ke*charge[atom1]*charge[atom2]/fij*(dDijdrij-Dij/fij*dfijdrij);
+				dEijdrij = -qiqj/fij*(dDijdrij-Dij/fij*dfijdrij);
+				dscaledrij = 4.0*dist1*(dist1_2-rCut2)/(rCut2*rCut2);
+				fdEijdrij = -dEijdrij*scale-gbEij*dscaledrij;
+				printf("dEijdrij:%20.10f between atom %d and %d. Eij: %20.10f dEijdrij: %20.10f scaled %20.10f\n",fdEijdrij,atom1,atom2,gbEij,dEijdrij,scale);
 
 				force[atom1][0] += -dEijdrij*dx/dist1;
 				force[atom1][1] += -dEijdrij*dy/dist1;

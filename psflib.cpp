@@ -55,6 +55,7 @@ char** read_psf_atom_data(FILE  *psfFile, int nAtoms, double *charge, int *nAtom
 		strncpy(massTemp,buffer+50,8);
 		massTemp[8]='\0';
 		mass = atof(massTemp);
+		// Need a reference
 		if (mass < 2.50) { // H
 			atomicRadius[i] = 1.20;
 			atomicScaling[i] = 0.85;
@@ -72,7 +73,7 @@ char** read_psf_atom_data(FILE  *psfFile, int nAtoms, double *charge, int *nAtom
 			atomicScaling[i] = 0.88;
 		} else if (mass < 23.64) { // Na
 			atomicRadius[i] = 2.27;
-			atomicScaling[i] = 0.80;
+			atomicScaling[i] = 0.86;
 		} else if (mass < 31.50) { // P
 			atomicRadius[i] = 1.85;
 			atomicScaling[i] = 0.86;

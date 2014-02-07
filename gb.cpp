@@ -278,6 +278,7 @@ void read_cfg_data(double *rCut,double *aCut, double *kappa, double *epsSolute, 
 	printf("Solute dielectric: %f\n",*epsSolute);
 	printf("Solvent dielectric: %f\n",*epsSolvent);
 	printf("kappa: %f\n",*kappa);
+	printf("Debye Screening length: %f\n",1.0 / *kappa);
 
 
 }
@@ -403,7 +404,7 @@ void make_neighbor_cells(double **pos, int numNonHatoms, double rCut, int *nCell
 void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double kappa, double epsSolute, double epsSolvent, double *charge, double *atomicRadius, double *atomicScaling, int *nCells,int *cellSize, int **cellList, int *cellAssign, FILE *gbFile, FILE *gbForceFile,int **excludeList)
 {
 
-	double pi=3.1415926535;
+//	double pi=3.1415926535;
 	double offset=0.09; // Angstroms
 //	double ke = 332.063711; //kcal/mol*Angstroms/e^2 coulombs constant
 	double ke = 332.0636; //kcal/mol*Angstroms/e^2 coulombs constant
@@ -452,15 +453,17 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 	double forceMag,fx,fy,fz;
 	double dhij,dhji;
 
-	coulE=0;
 
-	/* GB Phase 1: Compute Born Radii */
 	for (atom1=0;atom1<nAtoms;atom1++) {
-
 		/* zero forces */
 		force[atom1][0]=force[atom1][1]=force[atom1][2]=0.0;
 		dEda[atom1]=0;
-	
+	}
+
+	coulE=0;
+	/* GB Phase 1: Compute Born Radii */
+	for (atom1=0;atom1<nAtoms;atom1++) {
+
 		/* zero first term in neighbor list.  This will be used as a counting term */
 		neighborList[atom1][0]=0;
 
@@ -501,16 +504,16 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 							dist1_2 = dx*dx+dy*dy+dz*dz;
 							dist1 = sqrt(dist1_2);
 							if (dist1<rCut) {
-								dist1 = sqrt(dist1_2);
-		
 								/* accumulate the GB screening function (also called psi) */
-								psi[atom1] += compute_H(dist1,atomicRadius[atom1],atomicRadius[atom2],offset,atomicScaling[atom2],aCut);
+//								psi[atom1] += compute_H(dist1,atomicRadius[atom1]-offset,atomicRadius[atom2],offset,atomicScaling[atom2],aCut);
+								psi[atom1] += compute_H(dist1,atomicRadius[atom1],atomicRadius[atom2],offset,atomicScaling[atom2],12.272);
 	
 								/* populate neighbor list while we are here */
 								neighborList[atom1][neighborList[atom1][0]+1] = atom2;
 								neighborList[atom1][0]++; // count number of atoms in atom1's neighbor list
 							}
 							if (dist1<rCut && atom2>atom1 && exclude_check(atom1,atom2,excludeList)==0) {
+//							if (dist1<rCut && atom2>atom1) {
 								/* MM debug */
 //								printf("Atom %4d and atom %4d are a distance of %10.5f apart and not excluded\n",atom1, atom2, dist1);
 								/* NAMD shift/smoothing function */
@@ -524,17 +527,17 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 								coulE += temp;
 
 								/* compute coulomb force magnitude */
-								temp = -ke*charge[atom1]*charge[atom2]/dist1_2*scale;
-								temp += ke*charge[atom1]*charge[atom2]/dist1*dscaledrij;
+								temp /= dist1;
+								temp -= ke*charge[atom1]*charge[atom2]/dist1*dscaledrij;
 								/* add to atomic force array */
-								force[atom1][0] += -temp*dx/dist1;
-								force[atom1][1] += -temp*dy/dist1;
-								force[atom1][2] += -temp*dz/dist1;
-								force[atom2][0] +=  temp*dx/dist1;
-								force[atom2][1] +=  temp*dy/dist1;
-								force[atom2][2] +=  temp*dz/dist1;
+								force[atom1][0] +=  temp*dx/dist1;
+								force[atom1][1] +=  temp*dy/dist1;
+								force[atom1][2] +=  temp*dz/dist1;
+								force[atom2][0] += -temp*dx/dist1;
+								force[atom2][1] += -temp*dy/dist1;
+								force[atom2][2] += -temp*dz/dist1;
 
-								printf("%10.5f%10.5f%10.5f%10.5f\n", charge[atom1],charge[atom2],dx,temp*dx/dist1);
+//								printf("%10.5f%10.5f%10.5f%10.5f\n", charge[atom1],charge[atom2],dx,temp*dx/dist1);
 
 //								
 
@@ -553,6 +556,11 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 //		printf("Atom: %5d Radius: %20.10f Psi: %20.10f\n",atom1,bornRadius[atom1],screening);
 
 	}
+
+	/* print forces */
+//	for (atom1=0;atom1<nAtoms;atom1++) {
+//		printf("%5d %10.5f%10.5f%10.5f\n", atom1, force[atom1][0], force[atom1][1], force[atom1][2]);
+//	}
 
 	/* GB Phase 2: Compute dEijdrij, dai/drij and GB energy */
 	gbE = 0;
@@ -587,7 +595,7 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 				gbE += scale*gbEij;
 
 				/* accumulate forces for dEijdrij terms */
-				dfijdrij = dist1/fij*(1-0.25*exp(-dist1_2*0.25/aiaj));
+				dfijdrij = dist1/fij*(1.0-0.25*exp(-dist1_2*0.25/aiaj));
 				dDijdrij = kappa/epsSolvent*exp(-kappa*fij)*dfijdrij;
 				dEijdrij = -qiqj/fij*(dDijdrij-Dij/fij*dfijdrij);
 				dscaledrij = 4.0*dist1*(dist1_2-rCut2)/(rCut2*rCut2);
@@ -604,7 +612,7 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 
 				/* Accumulate component of dEda terms */
 				tmp_dEda = -0.5*qiqj/fij/fij*(kappa/epsSolvent*exp(-kappa*fij)-Dij/fij)*(aiaj+0.25*dist1_2)*exp(-0.25*dist1_2/aiaj);
-				printf("Instantaneous dEda value :%20.10f between atom %d and %d\n",tmp_dEda,atom1,atom2);
+//				printf("Instantaneous dEda value :%20.10f between atom %d and %d\n",tmp_dEda,atom1,atom2);
 				dEda[atom1] += tmp_dEda/bornRadius[atom1]*scale;
 				dEda[atom2] += tmp_dEda/bornRadius[atom2]*scale;
 
@@ -616,11 +624,15 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 		Dij = 1.0/epsSolute - exp(-kappa*fij)/epsSolvent;
 		selfE = -ke * Dij * charge[atom1]*charge[atom1]/(2*fij);
 		gbE += selfE;
+		/* FORCES */
+		/* Add self component of dEda */
+		qiqj = charge[atom1]*charge[atom1];
+		dEda[atom1]+=-0.5*ke*qiqj/fij*(kappa/epsSolvent*exp(-kappa*fij)-Dij/fij);
 		/* Accumulate daidr terms */
 		tanh2 = tanh(psi[atom1]*(delta+psi[atom1]*(-beta+gamma*psi[atom1])));
 		tanh2*=tanh2;
-		daidr[atom1] = bornRadius[atom1]*bornRadius[atom1]*(atomicRadius[atom1]-offset)/atomicRadius[atom1]*(1-tanh2)*(delta-2*beta*psi[atom1]+3*psi[atom1]*psi[atom1]);
-
+		daidr[atom1] = bornRadius[atom1]*bornRadius[atom1]*(atomicRadius[atom1]-offset)/atomicRadius[atom1]*(1.0-tanh2)*(delta-2.0*beta*psi[atom1]+3.0*gamma*psi[atom1]*psi[atom1]);
+		/* END FORCES */
 	}
 
 	printf("Generalized Born Energy: %20.10f Coulomb Energy: %20.10f Total: %20.10f\n",gbE,coulE,coulE+gbE);
@@ -639,13 +651,19 @@ void compute_gb_energy(double **pos,int nAtoms, double rCut, double aCut, double
 				dist1_2 = dx*dx+dy*dy+dz*dz;
 				dist1 = sqrt(dist1_2);
 
+//				fprintf(gbForceFile,"%10.5f\n",dist1);
+
 				/* compute remaining components of daidr terms */
-				dhij = compute_dH(dist1,atomicRadius[atom1],atomicRadius[atom2],offset,atomicScaling[atom2],aCut);
-				dhji = compute_dH(dist1,atomicRadius[atom2],atomicRadius[atom1],offset,atomicScaling[atom1],aCut);
+//				dhij = compute_dH(dist1,atomicRadius[atom1]-offset,atomicRadius[atom2],offset,atomicScaling[atom2],aCut);
+//				dhji = compute_dH(dist1,atomicRadius[atom2]-offset,atomicRadius[atom1],offset,atomicScaling[atom1],aCut);
+				dhij = compute_dH(dist1,atomicRadius[atom1],atomicRadius[atom2],offset,atomicScaling[atom2],12.27200);
+				dhji = compute_dH(dist1,atomicRadius[atom2],atomicRadius[atom1],offset,atomicScaling[atom1],12.27200);
 
-				printf("Pair %4d-%4d dhij:%10.5f dhji:%10.5f HijPrefix:%10.5f HjiPrefix%10.5f\n",atom1, atom2, dhij,dhji,dEda[atom1]*daidr[atom1],dEda[atom2]*daidr[atom2]);
-
-				forceMag = dEda[atom1]*daidr[atom1]*dhij+dEda[atom2]*daidr[atom2]*dhji;
+//				printf("Pair %4d-%4d dhij:%10.5f dhji:%10.5f HijPrefix:%10.5f HjiPrefix%10.5f\n",atom1, atom2, dhij,dhji,dEda[atom1]*daidr[atom1],dEda[atom2]*daidr[atom2]);
+//				printf("Pair %4d-%4d dij:%10.5f rhoi:%10.5f rhoj:%10.5f rhojs:%10.5f aCut:%10.5f\n", atom1, atom2, 1.0/dist1, atomicRadius[atom1], (atomicRadius[atom2]-offset), atomicRadius[atom2]*atomicScaling[atom2]-offset, aCut);
+//				printf("dEda[%1d]=%10.5f daidr[%1d]=%10.5f\n",atom1,dEda[atom1],atom1,daidr[atom1]);
+//				printf("dEda[%1d]=%10.5f daidr[%1d]=%10.5f\n",atom2,dEda[atom2],atom2,daidr[atom2]);
+				forceMag =  -(dEda[atom1]*daidr[atom1]*dhij+dEda[atom2]*daidr[atom2]*dhji);
 				fx = dx/dist1*forceMag;
 				fy = dy/dist1*forceMag;
 				fz = dz/dist1*forceMag;
@@ -737,20 +755,27 @@ double compute_dH(double rij, double rhoi, double rhoj, double offset, double Sj
 	double k2;
 
 	if (rij > (sRhoj + rCut)) { //h0
+//		printf("rij:%10.5f yields h0\n",rij);
 		return 0.0;
 	} else if (rij <= (sRhoj+rCut) && rij > (rCut - sRhoj)) { //h1
-		return -(rCut+sRhoj-rij)*(sRhoj2-rij2)/(8.0f*rc2*rij2*(sRhoj-rij)*(sRhoj-rij))-0.25/rij2*log((rij-sRhoj)/rCut);
+//		printf("rij:%10.5f yields h1\n",rij);
+		return -(rc2-rij2-sRhoj2+2.0*rij*sRhoj)*(sRhoj2+rij2)/(8.0f*rc2*rij2*(sRhoj-rij)*(sRhoj-rij))-0.25/rij2*log((rij-sRhoj)/rCut);
 	} else if (rij <= (rCut-sRhoj) && rij > (4*sRhoj)) { //h2
+//		printf("rij:%10.5f yields h2\n",rij);
 		k = sRhoj2/rij2; // rhojs^2/rij^2
 		k2 = k*sRhoj/(rij2*rij); // rhojs^3/rij^5
 		return -k2*(da+k*(db+k*(dc+k*(dd+k*de))));
 	} else if (rij <= 4*sRhoj && rij > (rhoi0+sRhoj)) { //h3
+//		printf("rij:%10.5f yields h3\n",rij);
 		return -0.5*( sRhoj*(rij2+sRhoj2)/(rij*(rij2-sRhoj2)*(rij2-sRhoj2)) + 0.5/rij2*log((rij-sRhoj)/(rij+sRhoj)) );
 	} else if ( rij <= (rhoi0+sRhoj) && rij > fabs(rhoi0-sRhoj)) { //h4
+//		printf("rij:%10.5f yields h4\n",rij);
 		return -0.25*( 0.5/rhoi02 - (rij2*(rhoi02-sRhoj2)-2.0*rij*sRhoj2*sRhoj+sRhoj2*(rhoi02-sRhoj2))/(2.0*rij2*rhoi02*(rij+sRhoj)*(rij+sRhoj)) + 1.0/rij2*log(rhoi0/(rij+sRhoj)) );
 	} else if (rhoi0 < sRhoj) { //h5
-		return -0.5*( sRhoj*(rij2+sRhoj2)/(rij*(rij-sRhoj2)*(rij-sRhoj2)) + 0.5/rij2*log((sRhoj-rij)/(rij+sRhoj)) );
+//		printf("rij:%10.5f yields h5\n",rij);
+		return -0.5*( sRhoj*(rij2+sRhoj2)/(rij*(rij2-sRhoj2)*(rij2-sRhoj2)) + 0.5/rij2*log((sRhoj-rij)/(rij+sRhoj)) );
 	} else { //h6
+//		printf("rij:%10.5f yields h6\n",rij);
 		return 0.0;
 	}
 
